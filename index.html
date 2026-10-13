@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tarjetas">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Tarjetas</title>
+<style>
+:root{--bg:#fff;--fg:#111;--card:#f2f2f7;--ac:#0a84ff;--bad:#ff453a;--ok:#30d158}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--fg:#f2f2f7;--card:#1c1c1e}}
+*{box-sizing:border-box}
+body{margin:0;font:17px -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:90px}
+nav{display:flex;gap:8px;padding:12px;padding-top:max(12px,env(safe-area-inset-top));position:sticky;top:0;background:var(--bg)}
+nav button{flex:1}
+button{font:inherit;border:0;border-radius:10px;padding:12px;background:var(--card);color:var(--fg)}
+button.on,button.pri{background:var(--ac);color:#fff}
+button.bad{color:var(--bad)}
+main{padding:0 12px}
+.study{background:var(--card);border-radius:14px;padding:28px 16px;text-align:center;min-height:180px;display:flex;align-items:center;justify-content:center;white-space:pre-wrap;font-size:22px}
+.row{display:flex;gap:8px;margin-top:12px}.row button{flex:1}
+.item{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.item div{flex:1;min-width:0}.item small{opacity:.6;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fab{position:fixed;right:20px;bottom:max(20px,env(safe-area-inset-bottom));width:60px;height:60px;border-radius:30px;font-size:34px;line-height:1;padding:0;background:var(--ac);color:#fff;box-shadow:0 4px 14px #0006}
+dialog{border:0;border-radius:14px;padding:16px;width:90%;max-width:420px;background:var(--bg);color:var(--fg)}
+dialog::backdrop{background:#0008}
+textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #8884;background:var(--card);color:var(--fg);margin-bottom:8px}
+.msg{opacity:.7;text-align:center;padding:20px}
+</style>
+</head>
+<body>
+<nav>
+  <button id="t1" class="on">Estudiar</button>
+  <button id="t2">Tarjetas</button>
+  <button id="imp">Importar</button>
+</nav>
+<main id="m"></main>
+<button id="fab" aria-label="Agregar">+</button>
+<input id="file" type="file" accept=".rar,.zip,.csv,.txt,.json" hidden>
+<dialog id="dlg">
+  <textarea id="f" rows="2" placeholder="Frente"></textarea>
+  <textarea id="b" rows="3" placeholder="Reverso"></textarea>
+  <div class="row"><button id="cancel">Cancelar</button><button id="save" class="pri">Guardar</button></div>
+</dialog>
+<script>
+const $=id=>document.getElementById(id);
+let cards=[];try{cards=JSON.parse(localStorage.getItem('cards')||'[]')}catch(e){}
+let tab=1,shown=false,cur=null;
+const save=()=>localStorage.setItem('cards',JSON.stringify(cards));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function render(){
+  $('t1').className=tab==1?'on':'';$('t2').className=tab==2?'on':'';
+  const m=$('m');
+  if(tab==1){
+    const due=cards.filter(c=>c.due<=Date.now());
+    if(!cards.length){m.innerHTML='<p class="msg">No hay tarjetas. Toca + o Importar.</p>';return}
+    if(!due.length){m.innerHTML='<p class="msg">Nada pendiente por ahora 🎉</p>';return}
+    if(!cur||!due.includes(cur))cur=due[Math.floor(Math.random()*due.length)];
+    m.innerHTML=`<p class="msg">${due.length} pendientes</p><div class="study">${esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f)}</div>`+
+      (shown?'<div class="row"><button class="bad" id="a0">Otra vez</button><button class="pri" id="a1">Bien</button></div>'
+            :'<div class="row"><button class="pri" id="rev">Mostrar respuesta</button></div>');
+    if(shown){$('a0').onclick=()=>grade(0);$('a1').onclick=()=>grade(1)}else $('rev').onclick=()=>{shown=true;render()};
+  }else{
+    if(!cards.length){m.innerHTML='<p class="msg">Sin tarjetas.</p>';return}
+    m.innerHTML=cards.map(c=>`<div class="item"><div><b>${esc(c.f)}</b><small>${esc(c.b)}</small></div><button class="bad" data-d="${c.id}">Eliminar</button></div>`).join('');
+    m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{if(confirm('¿Eliminar esta tarjeta?')){cards=cards.filter(c=>c.id!=b.dataset.d);save();render()}});
+  }
+}
+function grade(ok){
+  cur.iv=ok?Math.max(1,(cur.iv||0)*2):0;
+  cur.due=ok?Date.now()+cur.iv*864e5:Date.now()+6e4;
+  save();shown=false;cur=null;render();
+}
+$('t1').onclick=()=>{tab=1;render()};$('t2').onclick=()=>{tab=2;render()};
+$('fab').onclick=()=>{$('f').value='';$('b').value='';$('dlg').showModal()};
+$('cancel').onclick=()=>$('dlg').close();
+$('save').onclick=()=>{const f=$('f').value.trim(),b=$('b').value.trim();if(!f||!b)return;
+  cards.unshift({id:uid(),f,b,due:0,iv:0});save();$('dlg').close();render()};
+
+// ---- Importar ----
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  try{
+    const texts=await readFile(file);let n=0;
+    for(const [name,t] of texts)n+=parse(name,t);
+    save();tab=2;render();alert(n?`Se importaron ${n} tarjetas.`:'No encontré tarjetas en el archivo.');
+  }catch(err){alert('No se pudo leer el archivo: '+err.message)}
+};
+async function readFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext=='zip'){
+    const J=await load('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js','JSZip');
+    const z=await J.loadAsync(file),out=[];
+    for(const n of Object.keys(z.files))if(/\.(csv|txt|json)$/i.test(n)&&!z.files[n].dir)out.push([n,await z.files[n].async('string')]);
+    return out;
+  }
+  if(ext=='rar'){
+    const mod=await import('https://cdn.jsdelivr.net/npm/libarchive.js@2.0.2/dist/libarchive.js');
+    const blob=await (await fetch('https://cdn.jsdelivr.net/npm/libarchive.js@2.0.2/dist/worker-bundle.js')).blob();
+    mod.Archive.init({workerUrl:URL.createObjectURL(blob)});
+    const a=await mod.Archive.open(file),list=await a.getFilesArray(),out=[];
+    for(const it of list){
+      if(!/\.(csv|txt|json)$/i.test(it.path||it.file.name))continue;
+      const f=it.file.extract?await it.file.extract():it.file;
+      out.push([it.path||f.name,await f.text()]);
+    }
+    return out;
+  }
+  return [[file.name,await file.text()]];
+}
+function load(src,g){return new Promise((res,rej)=>{if(window[g])return res(window[g]);const s=document.createElement('script');s.src=src;s.onload=()=>res(window[g]);s.onerror=()=>rej(new Error('sin conexión para cargar librería'));document.head.appendChild(s)})}
+function parse(name,t){
+  let n=0;const add=(f,b)=>{f=(f||'').trim();b=(b||'').trim();if(f&&b){cards.push({id:uid(),f,b,due:0,iv:0});n++}};
+  if(/\.json$/i.test(name)){
+    const j=JSON.parse(t);(Array.isArray(j)?j:j.cards||[]).forEach(c=>Array.isArray(c)?add(c[0],c[1]):add(c.front??c.f??c.frente??c.q,c.back??c.b??c.reverso??c.a));
+  }else{
+    t.replace(/^\uFEFF/,'').split(/\r?\n/).forEach(l=>{
+      if(!l.trim()||l[0]=='#')return;
+      const sep=l.includes('\t')?'\t':l.includes(';')?';':',';const i=l.indexOf(sep);
+      if(i>0)add(l.slice(0,i),l.slice(i+1).replace(/\\n/g,'\n'));
+    });
+  }
+  return n;
+}
+render();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
