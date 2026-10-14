@@ -29,6 +29,9 @@ dialog{border:0;border-radius:14px;padding:16px;width:90%;max-width:420px;backgr
 dialog::backdrop{background:#0008}
 textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #8884;background:var(--card);color:var(--fg);margin-bottom:8px}
 .msg{opacity:.7;text-align:center;padding:20px}
+.opts{display:flex;justify-content:space-between;gap:8px;margin:12px 2px;font-size:15px;opacity:.85}
+.opts label{display:flex;align-items:center;gap:6px}
+.opts input{width:20px;height:20px}
 </style>
 </head>
 <body>
@@ -49,6 +52,25 @@ textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px soli
 const $=id=>document.getElementById(id);
 let cards=[];try{cards=JSON.parse(localStorage.getItem('cards')||'[]')}catch(e){}
 let tab=1,shown=false,cur=null;
+let opt={auto:true,listen:false};try{Object.assign(opt,JSON.parse(localStorage.getItem('opt')||'{}'))}catch(e){}
+const saveOpt=()=>{try{localStorage.setItem('opt',JSON.stringify(opt))}catch(e){}};
+
+// ---- Voz (la del iPhone, sin internet) ----
+let voice=null;
+const TTS='speechSynthesis' in window;
+function pickVoice(){
+  if(!TTS)return;const v=speechSynthesis.getVoices();
+  voice=v.find(x=>x.lang.replace('_','-')==='en-US'&&/samantha|ava|allison|nicky|enhanced|premium/i.test(x.name))
+     ||v.find(x=>x.lang.replace('_','-')==='en-US')||v.find(x=>x.lang.startsWith('en'))||null;
+}
+if(TTS){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
+function speak(t,rate){
+  if(!TTS){alert('Este navegador no tiene voz integrada.');return}
+  if(speechSynthesis.speaking||speechSynthesis.pending)speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);
+  u.lang='en-US';u.rate=rate||1;if(voice)u.voice=voice;
+  speechSynthesis.speak(u);
+}
 const save=()=>localStorage.setItem('cards',JSON.stringify(cards));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -60,14 +82,24 @@ function render(){
     const due=cards.filter(c=>c.due<=Date.now());
     if(!cards.length){m.innerHTML='<p class="msg">No hay tarjetas. Toca + o Importar.</p>';return}
     if(!due.length){m.innerHTML='<p class="msg">Nada pendiente por ahora 🎉</p>';return}
-    if(!cur||!due.includes(cur))cur=due[Math.floor(Math.random()*due.length)];
-    m.innerHTML=`<p class="msg">${due.length} pendientes</p><div class="study">${esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f)}</div>`+
+    let fresh=false;
+    if(!cur||!due.includes(cur)){cur=due[Math.floor(Math.random()*due.length)];fresh=true}
+    const front=(opt.listen&&!shown)?'🎧 Escucha y repite':esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f);
+    m.innerHTML=`<p class="msg">${due.length} pendientes</p><div class="study">${front}</div>`+
+      '<div class="row"><button class="pri" id="spk">🔊 Escuchar</button><button id="slow">🐢 Lento</button></div>'+
+      `<div class="opts"><label><input type="checkbox" id="o1"${opt.auto?' checked':''}> Voz automática</label><label><input type="checkbox" id="o2"${opt.listen?' checked':''}> Solo escuchar</label></div>`+
       (shown?'<div class="row"><button class="bad" id="a0">Otra vez</button><button class="pri" id="a1">Bien</button></div>'
             :'<div class="row"><button class="pri" id="rev">Mostrar respuesta</button></div>');
+    $('spk').onclick=()=>speak(cur.f,1);
+    $('slow').onclick=()=>speak(cur.f,.7);
+    $('o1').onchange=e=>{opt.auto=e.target.checked;saveOpt()};
+    $('o2').onchange=e=>{opt.listen=e.target.checked;saveOpt();render()};
     if(shown){$('a0').onclick=()=>grade(0);$('a1').onclick=()=>grade(1)}else $('rev').onclick=()=>{shown=true;render()};
+    if(fresh&&opt.auto)speak(cur.f,1);
   }else{
     if(!cards.length){m.innerHTML='<p class="msg">Sin tarjetas.</p>';return}
-    m.innerHTML=cards.map(c=>`<div class="item"><div><b>${esc(c.f)}</b><small>${esc(c.b)}</small></div><button class="bad" data-d="${c.id}">Eliminar</button></div>`).join('');
+    m.innerHTML=cards.map(c=>`<div class="item"><div><b>${esc(c.f)}</b><small>${esc(c.b)}</small></div><button data-s="${c.id}" aria-label="Escuchar">🔊</button><button class="bad" data-d="${c.id}">Eliminar</button></div>`).join('');
+    m.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{const c=cards.find(x=>x.id==b.dataset.s);if(c)speak(c.f,1)});
     m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{if(confirm('¿Eliminar esta tarjeta?')){cards=cards.filter(c=>c.id!=b.dataset.d);save();render()}});
   }
 }
