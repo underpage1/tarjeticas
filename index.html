@@ -36,6 +36,8 @@ dialog label{display:block;font-size:14px;opacity:.7;margin:4px 2px}
 textarea,input.t,select{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #8884;background:var(--card);color:var(--fg);margin-bottom:8px}
 .stack button{display:block;width:100%;margin-bottom:8px}
 .msg{opacity:.7;text-align:center;padding:20px}
+.note{opacity:.6;font-size:14px;margin:0 2px 10px}
+.done{line-height:1.5}.done b{font-size:26px}
 .opts{display:flex;justify-content:space-between;gap:8px;margin:12px 2px;font-size:15px;opacity:.85}
 .opts label{display:flex;align-items:center;gap:6px}
 .opts input{width:20px;height:20px}
@@ -63,15 +65,53 @@ textarea,input.t,select{width:100%;font:inherit;padding:10px;border-radius:10px;
 
 <dialog id="grp"></dialog>
 
+<dialog id="set">
+  <h3>Horario de repaso</h3>
+  <label>Cuando termines un tema, volver a repasarlo:</label>
+  <select id="sm"><option value="time">A una hora fija, todos los días</option><option value="interval">Después de cierto tiempo</option></select>
+  <div id="s1"><label>Hora</label><input class="t" id="st" type="time"></div>
+  <div id="s2"><label>Tiempo de espera</label>
+    <select id="sh"><option value="1">1 hora</option><option value="3">3 horas</option><option value="6">6 horas</option><option value="12">12 horas</option><option value="24">24 horas</option><option value="48">48 horas</option></select></div>
+  <p class="note" id="sp"></p>
+  <div class="row"><button id="sc">Cancelar</button><button id="ss" class="pri">Guardar</button></div>
+</dialog>
+
 <script>
 const $=id=>document.getElementById(id);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const rd=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||'')||d}catch(e){return d}};
 let cards=rd('cards',[]),decks=rd('decks',[]);
-let opt=Object.assign({auto:true,listen:false},rd('opt',{}));
+let opt=Object.assign({auto:true,listen:false,mode:'time',time:'08:00',hours:12},rd('opt',{}));
 const saveAll=()=>{try{localStorage.setItem('cards',JSON.stringify(cards));localStorage.setItem('decks',JSON.stringify(decks))}catch(e){alert('No se pudo guardar (almacenamiento lleno).')}};
 const saveOpt=()=>{try{localStorage.setItem('opt',JSON.stringify(opt))}catch(e){}};
+
+// ---- Horario de repaso ----
+// mode 'time': a una hora fija (mínimo 3 h después de terminar). mode 'interval': N horas después.
+function nextSlot(o){
+  o=o||opt;const now=Date.now();
+  if(o.mode==='interval')return now+(+o.hours||12)*36e5;
+  const [h,m]=String(o.time||'08:00').split(':').map(Number);
+  const t=new Date();t.setHours(h||0,m||0,0,0);
+  while(t.getTime()<now+3*36e5)t.setDate(t.getDate()+1);
+  return t.getTime();
+}
+function when(ts){
+  const d=new Date(ts),n=new Date();
+  const a=new Date(n.getFullYear(),n.getMonth(),n.getDate()),b=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const diff=Math.round((b-a)/864e5);
+  const hm=d.toLocaleTimeString('es-CO',{hour:'numeric',minute:'2-digit'});
+  const day=diff<=0?'hoy':diff===1?'mañana':d.toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'short'});
+  return day+' a las '+hm;
+}
+function left(ms){
+  const m=Math.max(1,Math.round(ms/6e4)),h=Math.floor(m/60);
+  return h>=24?`${Math.floor(h/24)} d ${h%24} h`:h?`${h} h ${m%60} min`:`${m} min`;
+}
+function schedText(){
+  if(opt.mode==='interval')return `Repaso: ${opt.hours} h después de terminar un tema`;
+  return 'Repaso: todos los días a las '+new Date(2000,0,1,...String(opt.time).split(':').map(Number)).toLocaleTimeString('es-CO',{hour:'numeric',minute:'2-digit'});
+}
 
 // Tarjetas de versiones anteriores (sin tema) -> tema "General"
 if(cards.some(c=>!c.d)){
@@ -117,8 +157,9 @@ const hush=()=>{if(TTS)try{speechSynthesis.cancel()}catch(e){}};
 function renderNav(){
   const n=$('nav');
   if(view==='home'){
-    n.innerHTML='<div class="ttl">Temas</div><button class="sm" id="imp">Importar</button>';
+    n.innerHTML='<div class="ttl">Temas</div><button class="sm" id="cfg" aria-label="Ajustes">⚙️</button><button class="sm" id="imp">Importar</button>';
     $('imp').onclick=()=>$('file').click();
+    $('cfg').onclick=openSettings;
   }else{
     n.innerHTML=`<button id="back">← Temas</button><button id="t1" class="${tab==1?'on':''}">Estudiar</button><button id="t2" class="${tab==2?'on':''}">Tarjetas</button>`;
     $('back').onclick=()=>{hush();view='home';cur=null;shown=false;render()};
@@ -135,9 +176,13 @@ function renderHome(){
   const m=$('m');
   if(!decks.length){m.innerHTML='<p class="msg">Aún no hay temas.<br>Toca + para crear un grupo de tarjetas o usa Importar.</p>';return}
   const now=Date.now();
-  m.innerHTML=decks.map(d=>{
+  m.innerHTML=`<p class="note">${esc(schedText())}</p>`+decks.map(d=>{
     const cs=cards.filter(c=>c.d===d.id),due=cs.filter(c=>c.due<=now).length;
-    return `<div class="item deck" data-o="${d.id}"><div><b>${esc(d.name)}</b><small>${cs.length} tarjetas · ${due} pendientes</small></div><button class="bad" data-x="${d.id}">Eliminar</button></div>`;
+    let info;
+    if(!cs.length)info='Sin tarjetas';
+    else if(due)info=`${cs.length} tarjetas · ${due} pendientes`;
+    else info=`✅ Listo por hoy · repasa ${when(Math.min(...cs.map(c=>c.due)))}`;
+    return `<div class="item deck" data-o="${d.id}"><div><b>${esc(d.name)}</b><small>${info}</small></div><button class="bad" data-x="${d.id}">Eliminar</button></div>`;
   }).join('');
   m.querySelectorAll('[data-o]').forEach(el=>el.onclick=()=>openDeck(el.dataset.o));
   m.querySelectorAll('[data-x]').forEach(b=>b.onclick=e=>{e.stopPropagation();delDeck(b.dataset.x)});
@@ -152,10 +197,23 @@ function renderStudy(){
   const m=$('m'),d=deckById(deckId),mine=cards.filter(c=>c.d===deckId);
   const head=`<h2 class="dn">${esc(d.name)}</h2>`;
   if(!mine.length){m.innerHTML=head+'<p class="msg">Este tema no tiene tarjetas. Toca + para agregar.</p>';return}
-  const due=mine.filter(c=>c.due<=Date.now());
-  if(!due.length){m.innerHTML=head+'<p class="msg">Nada pendiente en este tema por ahora 🎉</p>';return}
+  const now=Date.now(),due=mine.filter(c=>c.due<=now);
+  if(!due.length){
+    // Todo acertado: mostrar cuándo se puede repasar de nuevo
+    cur=null;shown=false;
+    const nx=Math.min(...mine.map(c=>c.due));
+    m.innerHTML=head+`<div class="study done"><div>🎉<br><b>¡Listo por hoy!</b><br><span style="font-size:16px;opacity:.7">Terminaste todas las tarjetas de este tema.</span></div></div>`+
+      `<p class="msg">Podrás repasar de nuevo<br><b>${when(nx)}</b><br><span id="cd">faltan ${left(nx-now)}</span></p>`+
+      '<div class="row"><button id="force">Repasar de todos modos</button></div>';
+    $('force').onclick=()=>{if(confirm('¿Repasar ahora? Se salta tu horario de repaso.')){cards.forEach(c=>{if(c.d===deckId)c.due=0});saveAll();render()}};
+    return;
+  }
   let fresh=false;
-  if(!cur||!due.includes(cur)){cur=due[Math.floor(Math.random()*due.length)];fresh=true}
+  if(!cur||!due.includes(cur)){
+    // primero las no vistas; las falladas ("Otra vez") van al final de la cola y vuelven hasta acertarlas
+    const mt=Math.min(...due.map(c=>c.t||0)),pool=due.filter(c=>(c.t||0)===mt);
+    cur=pool[Math.floor(Math.random()*pool.length)];fresh=true;
+  }
   const front=(opt.listen&&!shown)?'🎧 Escucha y repite':esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f);
   m.innerHTML=head+`<p class="msg" style="padding:6px">${due.length} pendientes</p><div class="study">${front}</div>`+
     '<div class="row"><button class="pri" id="spk">🔊 Escuchar</button><button id="slow">🐢 Lento</button></div>'+
@@ -178,8 +236,8 @@ function renderList(){
   m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{if(confirm('¿Eliminar esta tarjeta?')){cards=cards.filter(c=>c.id!=b.dataset.d);saveAll();render()}});
 }
 function grade(ok){
-  cur.iv=ok?Math.max(1,(cur.iv||0)*2):0;
-  cur.due=ok?Date.now()+cur.iv*864e5:Date.now()+6e4;
+  if(ok){cur.due=nextSlot();cur.t=0}        // acertada: se habilita en el próximo horario de repaso
+  else{cur.due=0;cur.t=Date.now()}          // "Otra vez": sigue pendiente y vuelve a salir hoy
   saveAll();shown=false;cur=null;render();
 }
 
@@ -244,6 +302,25 @@ function gStep(){
   }
 }
 
+// ---- Ajustes del horario de repaso ----
+function setForm(){
+  const mode=$('sm').value;
+  $('s1').style.display=mode==='time'?'block':'none';
+  $('s2').style.display=mode==='interval'?'block':'none';
+  const o={mode,time:$('st').value||'08:00',hours:+$('sh').value};
+  $('sp').textContent='Si terminas un tema ahora, podrás repasarlo de nuevo '+when(nextSlot(o))+'.';
+}
+function openSettings(){
+  $('sm').value=opt.mode;$('st').value=opt.time;$('sh').value=String(opt.hours);
+  setForm();$('set').showModal();
+}
+['sm','st','sh'].forEach(id=>{$(id).onchange=setForm;$(id).oninput=setForm});
+$('sc').onclick=()=>$('set').close();
+$('ss').onclick=()=>{
+  opt.mode=$('sm').value;opt.time=$('st').value||'08:00';opt.hours=+$('sh').value;
+  saveOpt();$('set').close();render();
+};
+
 // ---- Importar: cada archivo = un tema ----
 $('file').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
@@ -298,6 +375,12 @@ function parse(name,t){
   }
   return out.filter(p=>String(p[0]).trim()&&String(p[1]).trim());
 }
+// El tiempo pasa: refrescar la cuenta regresiva y habilitar el repaso cuando llegue la hora
+setInterval(()=>{
+  if(view==='home')renderHome();
+  else if(view==='deck'&&tab===1&&$('cd'))renderStudy();
+},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
 render();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
