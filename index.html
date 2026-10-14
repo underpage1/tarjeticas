@@ -9,25 +9,32 @@
 <link rel="manifest" href="manifest.webmanifest">
 <title>Tarjetas</title>
 <style>
-:root{--bg:#fff;--fg:#111;--card:#f2f2f7;--ac:#0a84ff;--bad:#ff453a;--ok:#30d158}
+:root{--bg:#fff;--fg:#111;--card:#f2f2f7;--ac:#0a84ff;--bad:#ff453a}
 @media(prefers-color-scheme:dark){:root{--bg:#000;--fg:#f2f2f7;--card:#1c1c1e}}
 *{box-sizing:border-box}
-body{margin:0;font:17px -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:90px}
-nav{display:flex;gap:8px;padding:12px;padding-top:max(12px,env(safe-area-inset-top));position:sticky;top:0;background:var(--bg)}
+body{margin:0;font:17px -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:100px}
+nav{display:flex;gap:8px;padding:12px;padding-top:max(12px,env(safe-area-inset-top));position:sticky;top:0;background:var(--bg);z-index:2}
 nav button{flex:1}
+nav .sm{flex:none;padding:10px 16px}
+.ttl{flex:1;font-weight:700;font-size:26px;align-self:center}
 button{font:inherit;border:0;border-radius:10px;padding:12px;background:var(--card);color:var(--fg)}
 button.on,button.pri{background:var(--ac);color:#fff}
 button.bad{color:var(--bad)}
 main{padding:0 12px}
+h2.dn{margin:4px 2px 8px;font-size:22px}
 .study{background:var(--card);border-radius:14px;padding:28px 16px;text-align:center;min-height:180px;display:flex;align-items:center;justify-content:center;white-space:pre-wrap;font-size:22px}
 .row{display:flex;gap:8px;margin-top:12px}.row button{flex:1}
 .item{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.item.deck{cursor:pointer;padding:14px 12px}
 .item div{flex:1;min-width:0}.item small{opacity:.6;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #fab{position:fixed;right:20px;bottom:max(20px,env(safe-area-inset-bottom));width:60px;height:60px;border-radius:30px;font-size:34px;line-height:1;padding:0;background:var(--ac);color:#fff;box-shadow:0 4px 14px #0006}
 dialog{border:0;border-radius:14px;padding:16px;width:90%;max-width:420px;background:var(--bg);color:var(--fg)}
 dialog::backdrop{background:#0008}
-textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #8884;background:var(--card);color:var(--fg);margin-bottom:8px}
+dialog h3{margin:0 0 12px;font-size:18px}
+dialog label{display:block;font-size:14px;opacity:.7;margin:4px 2px}
+textarea,input.t,select{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #8884;background:var(--card);color:var(--fg);margin-bottom:8px}
+.stack button{display:block;width:100%;margin-bottom:8px}
 .msg{opacity:.7;text-align:center;padding:20px}
 .opts{display:flex;justify-content:space-between;gap:8px;margin:12px 2px;font-size:15px;opacity:.85}
 .opts label{display:flex;align-items:center;gap:6px}
@@ -35,25 +42,58 @@ textarea{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px soli
 </style>
 </head>
 <body>
-<nav>
-  <button id="t1" class="on">Estudiar</button>
-  <button id="t2">Tarjetas</button>
-  <button id="imp">Importar</button>
-</nav>
+<nav id="nav"></nav>
 <main id="m"></main>
 <button id="fab" aria-label="Agregar">+</button>
 <input id="file" type="file" accept=".rar,.zip,.csv,.txt,.json" hidden>
+
+<dialog id="menu"><div class="stack">
+  <button id="mc" class="pri">Agregar tarjeta</button>
+  <button id="mg">Agregar nuevo grupo de tarjetas</button>
+  <button id="mx">Cancelar</button>
+</div></dialog>
+
 <dialog id="dlg">
+  <h3 id="dt">Agregar tarjeta</h3>
+  <select id="ds"></select>
   <textarea id="f" rows="2" placeholder="Frente"></textarea>
   <textarea id="b" rows="3" placeholder="Reverso"></textarea>
   <div class="row"><button id="cancel">Cancelar</button><button id="save" class="pri">Guardar</button></div>
 </dialog>
+
+<dialog id="grp"></dialog>
+
 <script>
 const $=id=>document.getElementById(id);
-let cards=[];try{cards=JSON.parse(localStorage.getItem('cards')||'[]')}catch(e){}
-let tab=1,shown=false,cur=null;
-let opt={auto:true,listen:false};try{Object.assign(opt,JSON.parse(localStorage.getItem('opt')||'{}'))}catch(e){}
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const rd=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||'')||d}catch(e){return d}};
+let cards=rd('cards',[]),decks=rd('decks',[]);
+let opt=Object.assign({auto:true,listen:false},rd('opt',{}));
+const saveAll=()=>{try{localStorage.setItem('cards',JSON.stringify(cards));localStorage.setItem('decks',JSON.stringify(decks))}catch(e){alert('No se pudo guardar (almacenamiento lleno).')}};
 const saveOpt=()=>{try{localStorage.setItem('opt',JSON.stringify(opt))}catch(e){}};
+
+// Tarjetas de versiones anteriores (sin tema) -> tema "General"
+if(cards.some(c=>!c.d)){
+  let g=decks.find(x=>x.name==='General');
+  if(!g){g={id:uid(),name:'General'};decks.push(g)}
+  cards.forEach(c=>{if(!c.d)c.d=g.id});saveAll();
+}
+
+let view='home',deckId=null,tab=1,shown=false,cur=null,addTo=null;
+const deckById=id=>decks.find(d=>d.id===id);
+function getDeck(name){
+  name=name.trim();
+  let d=decks.find(x=>x.name.toLowerCase()===name.toLowerCase());
+  if(!d){d={id:uid(),name};decks.push(d)}
+  return d;
+}
+function addCard(d,f,b){
+  f=f.trim();b=b.trim();if(!f||!b)return false;
+  const k=f.toLowerCase();
+  if(cards.some(c=>c.d===d.id&&c.f.toLowerCase()===k))return false;
+  cards.unshift({id:uid(),d:d.id,f,b,due:0,iv:0});return true;
+}
 
 // ---- Voz (la del iPhone, sin internet) ----
 let voice=null;
@@ -71,65 +111,163 @@ function speak(t,rate){
   u.lang='en-US';u.rate=rate||1;if(voice)u.voice=voice;
   speechSynthesis.speak(u);
 }
-const save=()=>localStorage.setItem('cards',JSON.stringify(cards));
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const hush=()=>{if(TTS)try{speechSynthesis.cancel()}catch(e){}};
 
-function render(){
-  $('t1').className=tab==1?'on':'';$('t2').className=tab==2?'on':'';
-  const m=$('m');
-  if(tab==1){
-    const due=cards.filter(c=>c.due<=Date.now());
-    if(!cards.length){m.innerHTML='<p class="msg">No hay tarjetas. Toca + o Importar.</p>';return}
-    if(!due.length){m.innerHTML='<p class="msg">Nada pendiente por ahora 🎉</p>';return}
-    let fresh=false;
-    if(!cur||!due.includes(cur)){cur=due[Math.floor(Math.random()*due.length)];fresh=true}
-    const front=(opt.listen&&!shown)?'🎧 Escucha y repite':esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f);
-    m.innerHTML=`<p class="msg">${due.length} pendientes</p><div class="study">${front}</div>`+
-      '<div class="row"><button class="pri" id="spk">🔊 Escuchar</button><button id="slow">🐢 Lento</button></div>'+
-      `<div class="opts"><label><input type="checkbox" id="o1"${opt.auto?' checked':''}> Voz automática</label><label><input type="checkbox" id="o2"${opt.listen?' checked':''}> Solo escuchar</label></div>`+
-      (shown?'<div class="row"><button class="bad" id="a0">Otra vez</button><button class="pri" id="a1">Bien</button></div>'
-            :'<div class="row"><button class="pri" id="rev">Mostrar respuesta</button></div>');
-    $('spk').onclick=()=>speak(cur.f,1);
-    $('slow').onclick=()=>speak(cur.f,.7);
-    $('o1').onchange=e=>{opt.auto=e.target.checked;saveOpt()};
-    $('o2').onchange=e=>{opt.listen=e.target.checked;saveOpt();render()};
-    if(shown){$('a0').onclick=()=>grade(0);$('a1').onclick=()=>grade(1)}else $('rev').onclick=()=>{shown=true;render()};
-    if(fresh&&opt.auto)speak(cur.f,1);
+// ---- Pantallas ----
+function renderNav(){
+  const n=$('nav');
+  if(view==='home'){
+    n.innerHTML='<div class="ttl">Temas</div><button class="sm" id="imp">Importar</button>';
+    $('imp').onclick=()=>$('file').click();
   }else{
-    if(!cards.length){m.innerHTML='<p class="msg">Sin tarjetas.</p>';return}
-    m.innerHTML=cards.map(c=>`<div class="item"><div><b>${esc(c.f)}</b><small>${esc(c.b)}</small></div><button data-s="${c.id}" aria-label="Escuchar">🔊</button><button class="bad" data-d="${c.id}">Eliminar</button></div>`).join('');
-    m.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{const c=cards.find(x=>x.id==b.dataset.s);if(c)speak(c.f,1)});
-    m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{if(confirm('¿Eliminar esta tarjeta?')){cards=cards.filter(c=>c.id!=b.dataset.d);save();render()}});
+    n.innerHTML=`<button id="back">← Temas</button><button id="t1" class="${tab==1?'on':''}">Estudiar</button><button id="t2" class="${tab==2?'on':''}">Tarjetas</button>`;
+    $('back').onclick=()=>{hush();view='home';cur=null;shown=false;render()};
+    $('t1').onclick=()=>{tab=1;render()};
+    $('t2').onclick=()=>{hush();tab=2;render()};
   }
+}
+function render(){
+  if(view==='deck'&&!deckById(deckId))view='home';
+  renderNav();
+  if(view==='home')renderHome();else if(tab==1)renderStudy();else renderList();
+}
+function renderHome(){
+  const m=$('m');
+  if(!decks.length){m.innerHTML='<p class="msg">Aún no hay temas.<br>Toca + para crear un grupo de tarjetas o usa Importar.</p>';return}
+  const now=Date.now();
+  m.innerHTML=decks.map(d=>{
+    const cs=cards.filter(c=>c.d===d.id),due=cs.filter(c=>c.due<=now).length;
+    return `<div class="item deck" data-o="${d.id}"><div><b>${esc(d.name)}</b><small>${cs.length} tarjetas · ${due} pendientes</small></div><button class="bad" data-x="${d.id}">Eliminar</button></div>`;
+  }).join('');
+  m.querySelectorAll('[data-o]').forEach(el=>el.onclick=()=>openDeck(el.dataset.o));
+  m.querySelectorAll('[data-x]').forEach(b=>b.onclick=e=>{e.stopPropagation();delDeck(b.dataset.x)});
+}
+function openDeck(id){view='deck';deckId=id;tab=1;cur=null;shown=false;render();window.scrollTo(0,0)}
+function delDeck(id){
+  const d=deckById(id),n=cards.filter(c=>c.d===id).length;
+  if(!confirm(`¿Eliminar el tema "${d.name}" y sus ${n} tarjetas?`))return;
+  cards=cards.filter(c=>c.d!==id);decks=decks.filter(x=>x.id!==id);saveAll();render();
+}
+function renderStudy(){
+  const m=$('m'),d=deckById(deckId),mine=cards.filter(c=>c.d===deckId);
+  const head=`<h2 class="dn">${esc(d.name)}</h2>`;
+  if(!mine.length){m.innerHTML=head+'<p class="msg">Este tema no tiene tarjetas. Toca + para agregar.</p>';return}
+  const due=mine.filter(c=>c.due<=Date.now());
+  if(!due.length){m.innerHTML=head+'<p class="msg">Nada pendiente en este tema por ahora 🎉</p>';return}
+  let fresh=false;
+  if(!cur||!due.includes(cur)){cur=due[Math.floor(Math.random()*due.length)];fresh=true}
+  const front=(opt.listen&&!shown)?'🎧 Escucha y repite':esc(shown?cur.f+'\n\n— — —\n\n'+cur.b:cur.f);
+  m.innerHTML=head+`<p class="msg" style="padding:6px">${due.length} pendientes</p><div class="study">${front}</div>`+
+    '<div class="row"><button class="pri" id="spk">🔊 Escuchar</button><button id="slow">🐢 Lento</button></div>'+
+    `<div class="opts"><label><input type="checkbox" id="o1"${opt.auto?' checked':''}> Voz automática</label><label><input type="checkbox" id="o2"${opt.listen?' checked':''}> Solo escuchar</label></div>`+
+    (shown?'<div class="row"><button class="bad" id="a0">Otra vez</button><button class="pri" id="a1">Bien</button></div>'
+          :'<div class="row"><button class="pri" id="rev">Mostrar respuesta</button></div>');
+  $('spk').onclick=()=>speak(cur.f,1);
+  $('slow').onclick=()=>speak(cur.f,.7);
+  $('o1').onchange=e=>{opt.auto=e.target.checked;saveOpt()};
+  $('o2').onchange=e=>{opt.listen=e.target.checked;saveOpt();render()};
+  if(shown){$('a0').onclick=()=>grade(0);$('a1').onclick=()=>grade(1)}else $('rev').onclick=()=>{shown=true;render()};
+  if(fresh&&opt.auto)speak(cur.f,1);
+}
+function renderList(){
+  const m=$('m'),d=deckById(deckId),mine=cards.filter(c=>c.d===deckId);
+  const head=`<h2 class="dn">${esc(d.name)}</h2>`;
+  if(!mine.length){m.innerHTML=head+'<p class="msg">Sin tarjetas.</p>';return}
+  m.innerHTML=head+mine.map(c=>`<div class="item"><div><b>${esc(c.f)}</b><small>${esc(c.b)}</small></div><button data-s="${c.id}" aria-label="Escuchar">🔊</button><button class="bad" data-d="${c.id}">Eliminar</button></div>`).join('');
+  m.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{const c=cards.find(x=>x.id==b.dataset.s);if(c)speak(c.f,1)});
+  m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{if(confirm('¿Eliminar esta tarjeta?')){cards=cards.filter(c=>c.id!=b.dataset.d);saveAll();render()}});
 }
 function grade(ok){
   cur.iv=ok?Math.max(1,(cur.iv||0)*2):0;
   cur.due=ok?Date.now()+cur.iv*864e5:Date.now()+6e4;
-  save();shown=false;cur=null;render();
+  saveAll();shown=false;cur=null;render();
 }
-$('t1').onclick=()=>{tab=1;render()};$('t2').onclick=()=>{tab=2;render()};
-$('fab').onclick=()=>{$('f').value='';$('b').value='';$('dlg').showModal()};
-$('cancel').onclick=()=>$('dlg').close();
-$('save').onclick=()=>{const f=$('f').value.trim(),b=$('b').value.trim();if(!f||!b)return;
-  cards.unshift({id:uid(),f,b,due:0,iv:0});save();$('dlg').close();render()};
 
-// ---- Importar ----
-$('imp').onclick=()=>$('file').click();
+// ---- Botón + ----
+$('fab').onclick=()=>{
+  if(view==='deck')openAdd(deckId);   // dentro de un tema: solo "agregar tarjeta"
+  else $('menu').showModal();          // en Temas: menú con las dos opciones
+};
+$('mx').onclick=()=>$('menu').close();
+$('mc').onclick=()=>{$('menu').close();openAdd(null)};
+$('mg').onclick=()=>{$('menu').close();openGroup()};
+
+// ---- Agregar una tarjeta ----
+function openAdd(did){
+  if(!did&&!decks.length){alert('Primero crea un grupo de tarjetas.');openGroup();return}
+  addTo=did;
+  $('ds').innerHTML=decks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('ds').style.display=did?'none':'block';
+  $('dt').textContent=did?'Agregar tarjeta a: '+deckById(did).name:'Agregar tarjeta';
+  $('f').value='';$('b').value='';$('dlg').showModal();
+}
+$('cancel').onclick=()=>$('dlg').close();
+$('save').onclick=()=>{
+  const f=$('f').value.trim(),b=$('b').value.trim();if(!f||!b)return;
+  const d=deckById(addTo||$('ds').value);
+  if(!addCard(d,f,b)){alert('Esa tarjeta ya existe en este tema.');return}
+  saveAll();$('dlg').close();render();
+};
+
+// ---- Agregar un grupo nuevo ----
+let G=null;
+function openGroup(){G={name:'',n:5,i:0,items:[]};gStep();$('grp').showModal()}
+function gStep(){
+  const g=$('grp');
+  if(G.i===0){
+    g.innerHTML=`<h3>Nuevo grupo de tarjetas</h3>
+      <label>Nombre del tema</label><input class="t" id="gn" placeholder="Ej. Ciencias" value="${esc(G.name)}">
+      <label>¿Cuántas tarjetas vas a subir?</label><input class="t" id="gq" type="number" inputmode="numeric" min="1" max="200" value="${G.n}">
+      <div class="row"><button id="gx">Cancelar</button><button id="go" class="pri">Continuar</button></div>`;
+    $('gx').onclick=()=>g.close();
+    $('go').onclick=()=>{
+      const name=$('gn').value.trim(),n=parseInt($('gq').value,10);
+      if(!name){$('gn').focus();return}
+      if(!(n>=1&&n<=200)){alert('Escribe una cantidad entre 1 y 200.');return}
+      G.name=name;G.n=n;G.i=1;gStep();
+    };
+  }else{
+    const last=G.i===G.n;
+    g.innerHTML=`<h3>${esc(G.name)} · Tarjeta ${G.i} de ${G.n}</h3>
+      <textarea id="gf" rows="2" placeholder="Frente"></textarea>
+      <textarea id="gb" rows="3" placeholder="Reverso"></textarea>
+      <div class="row"><button id="gx">Cancelar</button><button id="go" class="pri">${last?'Terminar':'Siguiente'}</button></div>`;
+    $('gx').onclick=()=>{if(G.i>1&&!confirm('¿Descartar las tarjetas de este grupo?'))return;g.close()};
+    $('go').onclick=()=>{
+      const f=$('gf').value.trim(),b=$('gb').value.trim();
+      if(!f){$('gf').focus();return}if(!b){$('gb').focus();return}
+      G.items[G.i-1]=[f,b];
+      if(!last){G.i++;gStep();$('gf').focus();return}
+      const d=getDeck(G.name);G.items.forEach(([x,y])=>addCard(d,x,y));
+      saveAll();g.close();view='deck';deckId=d.id;tab=2;cur=null;render();window.scrollTo(0,0);
+    };
+  }
+}
+
+// ---- Importar: cada archivo = un tema ----
 $('file').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
   try{
-    const texts=await readFile(file);let n=0;
-    for(const [name,t] of texts)n+=parse(name,t);
-    save();tab=2;render();alert(n?`Se importaron ${n} tarjetas.`:'No encontré tarjetas en el archivo.');
+    const texts=await readFile(file);let add=0,dup=0;const used=new Set();
+    for(const [name,t] of texts){
+      const pairs=parse(name,t);if(!pairs.length)continue;
+      const d=getDeck(deckName(name));used.add(d.id);
+      for(const [f,b] of pairs)addCard(d,f,b)?add++:dup++;
+    }
+    saveAll();view='home';render();
+    alert(add?`Importé ${add} tarjetas en ${used.size} tema(s).`+(dup?` (${dup} repetidas omitidas)`:''):(dup?'Esas tarjetas ya estaban importadas.':'No encontré tarjetas en el archivo.'));
   }catch(err){alert('No se pudo leer el archivo: '+err.message)}
 };
+function deckName(path){
+  let n=path.split('/').pop().replace(/\.[^.]+$/,'').replace(/^\d+[_\-\s]*/,'').replace(/_/g,' ').trim()||'Importadas';
+  return n.charAt(0).toUpperCase()+n.slice(1);
+}
 async function readFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
   if(ext=='zip'){
     const J=await load('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js','JSZip');
     const z=await J.loadAsync(file),out=[];
-    for(const n of Object.keys(z.files))if(/\.(csv|txt|json)$/i.test(n)&&!z.files[n].dir)out.push([n,await z.files[n].async('string')]);
+    for(const n of Object.keys(z.files).sort())if(/\.(csv|txt|json)$/i.test(n)&&!z.files[n].dir&&!/(^|\/)(__MACOSX|\.)/.test(n))out.push([n,await z.files[n].async('string')]);
     return out;
   }
   if(ext=='rar'){
@@ -148,17 +286,17 @@ async function readFile(file){
 }
 function load(src,g){return new Promise((res,rej)=>{if(window[g])return res(window[g]);const s=document.createElement('script');s.src=src;s.onload=()=>res(window[g]);s.onerror=()=>rej(new Error('sin conexión para cargar librería'));document.head.appendChild(s)})}
 function parse(name,t){
-  let n=0;const add=(f,b)=>{f=(f||'').trim();b=(b||'').trim();if(f&&b){cards.push({id:uid(),f,b,due:0,iv:0});n++}};
+  const out=[];
   if(/\.json$/i.test(name)){
-    const j=JSON.parse(t);(Array.isArray(j)?j:j.cards||[]).forEach(c=>Array.isArray(c)?add(c[0],c[1]):add(c.front??c.f??c.frente??c.q,c.back??c.b??c.reverso??c.a));
+    const j=JSON.parse(t);(Array.isArray(j)?j:j.cards||[]).forEach(c=>Array.isArray(c)?out.push([c[0]||'',c[1]||'']):out.push([c.front??c.f??c.frente??c.q??'',c.back??c.b??c.reverso??c.a??'']));
   }else{
-    t.replace(/^\uFEFF/,'').split(/\r?\n/).forEach(l=>{
+    t.replace(/^﻿/,'').split(/\r?\n/).forEach(l=>{
       if(!l.trim()||l[0]=='#')return;
       const sep=l.includes('\t')?'\t':l.includes(';')?';':',';const i=l.indexOf(sep);
-      if(i>0)add(l.slice(0,i),l.slice(i+1).replace(/\\n/g,'\n'));
+      if(i>0)out.push([l.slice(0,i),l.slice(i+1).replace(/\\n/g,'\n')]);
     });
   }
-  return n;
+  return out.filter(p=>String(p[0]).trim()&&String(p[1]).trim());
 }
 render();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
